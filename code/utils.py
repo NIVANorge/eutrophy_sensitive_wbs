@@ -108,3 +108,110 @@ def get_wfd_class(boundary_str, value):
         return class_names[3]
     else:
         return class_names[4]
+
+
+def get_teotil2_results_for_regine(st_yr, end_yr, reg_id):
+    """ """
+    df_list = []
+    for year in range(st_yr, end_yr + 1):
+        base_url = f"https://raw.githubusercontent.com/NIVANorge/teotil2/main/data/norway_annual_output_data/teotil2_results_{year}.csv"
+        df = pd.read_csv(base_url)
+        df = df.query("regine == @reg_id").copy()
+        if len(df) == 0:
+            print(f"WARNING: No TEOTIL2 results for {reg_id} in {year}.")
+        df["År"] = year
+        cols = [i for i in df.columns if i.split("_")[0] == "accum"]
+        df = df[["regine", "År"] + cols]
+        df_list.append(df)
+    df = pd.concat(df_list)
+
+    return df
+
+
+def get_teotil3_results_for_regine(st_yr, end_yr, reg_id, agri_loss_model, nve_data_yr):
+    """ """
+    df = pd.read_csv(
+        f"/home/jovyan/shared/common/teotil3/evaluation/teo3_results_nve{nve_data_yr}_{st_yr}-{end_yr}_agri-{agri_loss_model}-loss.csv"
+    )
+    df = df.query(
+        "(regine == @reg_id) and (year >= @st_yr) and (year <= @end_yr)"
+    ).copy()
+    if len(df) == 0:
+        print(f"WARNING: No TEOTIL3 results for {reg_id}.")
+    df["År"] = df["year"]
+    cols = [i for i in df.columns if i.split("_")[0] == "accum"]
+    df = df[["regine", "År"] + cols]
+    for col in df.columns:
+        if col.endswith("_kg"):
+            new_col = col.replace("_kg", "_tonnes")
+            df[new_col] = df[col] / 1000
+            del df[col]
+
+    return df
+
+
+def get_aggregation_dict_for_columns(par, model="teotil2"):
+    """Make a dict mapping TEOTIL column names to summary columns with
+    aggregation where necessary.
+
+    Args
+        par: Str. Either 'n' or 'p'
+
+    Returns
+        Dict with key's equal to output headings and values are lists
+        of columns to aggregate.
+    """
+    assert par in ("n", "p")
+    assert model in ("teotil2", "teotil3")
+
+    if model == "teotil2":
+        agg_dict = {
+            "Akvakultur": [f"accum_aqu_tot-{par}_tonnes"],
+            "Jordbruk": [
+                f"accum_agri_diff_tot-{par}_tonnes",
+                f"accum_agri_pt_tot-{par}_tonnes",
+            ],
+            "Avløp": [f"accum_ren_tot-{par}_tonnes", f"accum_spr_tot-{par}_tonnes"],
+            "Industri": [f"accum_ind_tot-{par}_tonnes"],
+            "Bebygd": [f"accum_urban_tot-{par}_tonnes"],
+            "Bakgrunn": [f"accum_nat_diff_tot-{par}_tonnes"],
+        }
+    else:
+        agg_dict = {
+            "Akvakultur": [f"accum_aquaculture_tot{par}_tonnes"],
+            "Jordbruk": [f"accum_agriculture_tot{par}_tonnes"],
+            "Avløp": [
+                f"accum_large-wastewater_tot{par}_tonnes",
+                f"accum_spredt_tot{par}_tonnes",
+            ],
+            "Industri": [f"accum_industry_tot{par}_tonnes"],
+            "Bebygd": [f"accum_urban_tot{par}_tonnes"],
+            "Bakgrunn": [
+                f"accum_agriculture-background_tot{par}_tonnes",
+                f"accum_upland_tot{par}_tonnes",
+                f"accum_wood_tot{par}_tonnes",
+                f"accum_lake_tot{par}_tonnes",
+            ],
+        }
+
+    return agg_dict
+
+
+def aggregate_parameters(df, par, model):
+    """Aggregate columns in TEOTIL output to headings used in the report.
+
+    Args
+        df:    Dataframe of TEOTIL results
+        par:   Str. Either 'n' or 'p'
+        model: Str. Either 'teotil2' or 'teotil3'
+
+    Returns
+        Dataframe.
+    """
+    agg_dict = get_aggregation_dict_for_columns(par, model=model)
+    for group, cols in agg_dict.items():
+        df[group] = df[cols].sum(axis=1)
+
+    df = df[["regine", "År"] + list(agg_dict.keys())]
+
+    return df
